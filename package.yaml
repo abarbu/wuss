@@ -20,6 +20,9 @@ library:
   - connection ==0.2.*
   - network
   - websockets >=0.9 && <0.13
+  - lifted-base
+  - transformers-base
+  - monad-control
   exposed-modules: Wuss
 license: MIT
 maintainer: Taylor Fausak

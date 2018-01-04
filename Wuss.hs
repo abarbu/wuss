@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 {- |
@@ -47,7 +48,6 @@ module Wuss
     ) where
 
 import qualified Control.Applicative as Applicative
-import qualified Control.Exception as Exception
 import qualified Data.Bool as Bool
 import qualified Data.ByteString as StrictBytes
 import qualified Data.ByteString.Lazy as LazyBytes
@@ -59,7 +59,9 @@ import qualified Network.WebSockets as WebSockets
 import qualified Network.WebSockets.Stream as Stream
 import qualified System.IO as IO
 import qualified System.IO.Error as IO.Error
-
+import qualified Control.Exception.Lifted as Lifted
+import qualified Control.Monad.Base as Base
+import qualified Control.Monad.Trans.Control as Control
 
 {- |
     A secure replacement for 'Network.WebSockets.runClient'.
@@ -68,11 +70,12 @@ import qualified System.IO.Error as IO.Error
     >>> runSecureClient "echo.websocket.org" 443 "/" app
 -}
 runSecureClient
-    :: Socket.HostName -- ^ Host
+    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+      Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
-    -> WebSockets.ClientApp a -- ^ Application
-    -> IO.IO a
+    -> WebSockets.ClientApp' m a -- ^ Application
+    -> m a
 runSecureClient host port path app = do
     let options = WebSockets.defaultConnectionOptions
     let headers = []
@@ -118,13 +121,14 @@ runSecureClient host port path app = do
     >     return ()
 -}
 runSecureClientWith
-    :: Socket.HostName -- ^ Host
+    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+      Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
     -> WebSockets.ConnectionOptions -- ^ Options
     -> WebSockets.Headers -- ^ Headers
-    -> WebSockets.ClientApp a -- ^ Application
-    -> IO.IO a
+    -> WebSockets.ClientApp' m a -- ^ Application
+    -> m a
 runSecureClientWith host port path options headers app = do
     let config = defaultConfig
     runSecureClientWithConfig host port path config options headers app
@@ -150,22 +154,23 @@ defaultConfig = do
 
 -- | Runs a secure WebSockets client with the given 'Config'.
 runSecureClientWithConfig
-    :: Socket.HostName -- ^ Host
+    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+    Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
     -> Config -- ^ Config
     -> WebSockets.ConnectionOptions -- ^ Options
     -> WebSockets.Headers -- ^ Headers
-    -> WebSockets.ClientApp a -- ^ Application
-    -> IO.IO a
+    -> WebSockets.ClientApp' m a -- ^ Application
+    -> m a
 runSecureClientWithConfig host port path config options headers app = do
-    context <- Connection.initConnectionContext
-    Exception.bracket
-        (Connection.connectTo context (connectionParams host port))
-        Connection.connectionClose
+    context <- Base.liftBase Connection.initConnectionContext
+    Lifted.bracket
+        (Base.liftBase (Connection.connectTo context (connectionParams host port)))
+        (\x -> Base.liftBase (Connection.connectionClose x))
         (\connection -> do
             stream <-
-                Stream.makeStream (reader config connection) (writer connection)
+                Base.liftBase (Stream.makeStream (reader config connection) (writer connection))
             WebSockets.runClientWithStream stream host path options headers app)
 
 
@@ -193,26 +198,27 @@ tlsSettings = do
 
 
 reader
-    :: Config
+    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+    Config
     -> Connection.Connection
-    -> IO.IO (Maybe.Maybe StrictBytes.ByteString)
+    -> m (Maybe.Maybe StrictBytes.ByteString)
 reader config connection =
-    IO.Error.catchIOError (do
-        chunk <- (connectionGet config) connection
+    Lifted.catch (do
+        chunk <- Base.liftBase ((connectionGet config) connection)
         Applicative.pure (Maybe.Just chunk))
     (\e ->
         if IO.Error.isEOFError e
             then Applicative.pure Maybe.Nothing
-            else Exception.throwIO e)
-
+            else Lifted.throwIO e)
 
 writer
-    :: Connection.Connection
+    :: (Base.MonadBase IO.IO m) =>
+    Connection.Connection
     -> Maybe.Maybe LazyBytes.ByteString
-    -> IO.IO ()
+    -> m ()
 writer connection maybeBytes = do
     case maybeBytes of
         Maybe.Nothing -> do
             Applicative.pure ()
         Maybe.Just bytes -> do
-            Connection.connectionPut connection (LazyBytes.toStrict bytes)
+            Base.liftBase (Connection.connectionPut connection (LazyBytes.toStrict bytes))
