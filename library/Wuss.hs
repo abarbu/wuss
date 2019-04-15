@@ -62,6 +62,7 @@ import qualified System.IO.Error as IO.Error
 import qualified Control.Exception.Lifted as Lifted
 import qualified Control.Monad.Base as Base
 import qualified Control.Monad.Trans.Control as Control
+import Control.Monad.Fail (MonadFail)
 
 {- |
     A secure replacement for 'Network.WebSockets.runClient'.
@@ -70,7 +71,7 @@ import qualified Control.Monad.Trans.Control as Control
     >>> runSecureClient "echo.websocket.org" 443 "/" app
 -}
 runSecureClient
-    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+    :: (Control.MonadBaseControl IO.IO m, MonadFail m) =>
       Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
@@ -78,8 +79,7 @@ runSecureClient
     -> m a
 runSecureClient host port path app = do
     let options = WebSockets.defaultConnectionOptions
-    let headers = []
-    runSecureClientWith host port path options headers app
+    runSecureClientWith host port path options [] app
 
 
 {- |
@@ -121,7 +121,7 @@ runSecureClient host port path app = do
     >     return ()
 -}
 runSecureClientWith
-    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+    :: (Control.MonadBaseControl IO.IO m, MonadFail m) =>
       Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
@@ -154,7 +154,7 @@ defaultConfig = do
 
 -- | Runs a secure WebSockets client with the given 'Config'.
 runSecureClientWithConfig
-    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m) =>
+    :: (Base.MonadBase IO.IO m, Control.MonadBaseControl IO.IO m, MonadFail m) =>
     Socket.HostName -- ^ Host
     -> Socket.PortNumber -- ^ Port
     -> String.String -- ^ Path
